@@ -221,6 +221,7 @@ nav button.on span{animation:pop2 .55s cubic-bezier(.2,.9,.3,1.2)}
         <label for="p2">Повторите пароль</label>
         <input id="p2" type="password" autocomplete="new-password">
       </div>
+      <label style="display:flex;align-items:center;gap:9px;margin:14px 0;color:var(--tx);font-size:13px"><input id="rememberDevice" type="checkbox" checked style="width:17px;height:17px;accent-color:var(--g)"> Оставаться в системе на этом устройстве</label>
       <div class="err" id="autherr" role="alert"></div>
       <button class="btn full" id="authBtn" type="submit">Войти</button>
     </form>
@@ -255,7 +256,7 @@ const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 async function derive(pw,salt,iter=250000){
   const k=await crypto.subtle.importKey('raw',enc.encode(pw),'PBKDF2',false,['deriveBits']);
   const bits=new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations:iter},k,512));
-  return{verifier:b64(bits.slice(0,32)),key:await crypto.subtle.importKey('raw',bits.slice(32),'AES-GCM',false,['encrypt','decrypt'])};
+  return{verifier:b64(bits.slice(0,32)),key:await crypto.subtle.importKey('raw',bits.slice(32),'AES-GCM',true,['encrypt','decrypt'])};
 }
 let db=null,user=null,ckey=null,queue=Promise.resolve();
 async function persist(){
@@ -309,12 +310,34 @@ async function submitAuth(e){
       if((rec.iter||250000)<600000)await upgradeKdf(name,pw);
     }
     $('#p').value=$('#p2').value='';
+    await storeSession();
     $('#auth').hidden=true;$('#app').hidden=false;bump();go('home');
   }catch(ex){err('Ошибка входа. Проверьте данные и попробуйте ещё раз')}
   finally{$('#authBtn').disabled=false;$('#authBtn').textContent=mode==='reg'?'Создать аккаунт':'Войти'}
   return false;
 }
-async function logout(){await queue;clearTimeout(idleT);clearTimeout(hideT);$('#view').innerHTML='';db=null;ckey=null;user=null;$('#app').hidden=true;$('#auth').hidden=false;closeModal()}
+async function logout(){await queue;localStorage.removeItem('versun_session');clearTimeout(idleT);clearTimeout(hideT);$('#view').innerHTML='';db=null;ckey=null;user=null;$('#app').hidden=true;$('#auth').hidden=false;closeModal()}
+async function storeSession(){
+  if(!ckey||!user)return;
+  if(!$('#rememberDevice')?.checked){localStorage.removeItem('versun_session');return}
+  try{
+    const raw=await crypto.subtle.exportKey('raw',ckey);
+    localStorage.setItem('versun_session',JSON.stringify({user,key:b64(raw),expires:Date.now()+30*24*60*60*1000}));
+  }catch(e){localStorage.removeItem('versun_session')}
+}
+async function restoreSession(){
+  try{
+    const saved=JSON.parse(localStorage.getItem('versun_session')||'null');
+    if(!saved||!saved.user||!saved.key||saved.expires<Date.now()){localStorage.removeItem('versun_session');return}
+    const key=await crypto.subtle.importKey('raw',unb64(saved.key),'AES-GCM',true,['encrypt','decrypt']);
+    const raw=JSON.parse(localStorage.getItem('versun_data_'+saved.user)||'null');
+    if(!raw)throw new Error('missing saved data');
+    const restored=JSON.parse(dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(raw.iv)},key,unb64(raw.ct))));
+    user=saved.user;ckey=key;db=restored;
+    db={...defaults(),...db,profile:{...defaults().profile,...db.profile},settings:{...defaults().settings,...db.settings}};
+    $('#u').value=user;$('#auth').hidden=true;$('#app').hidden=false;bump();go('home');
+  }catch(e){localStorage.removeItem('versun_session')}
+}
 
 
 /* ---------- security helpers ---------- */
@@ -327,10 +350,10 @@ async function upgradeKdf(name,pw){
   ckey=d.key;all[name]={salt:b64(ns),verifier:d.verifier,iter:600000};
   await persist();localStorage.setItem('versun_users',JSON.stringify(all))}
 let idleT,hideT;
-function lock(){if(!ckey)return;logout().then(()=>toast('Сеанс закрыт из-за бездействия. Войдите снова'))}
-function bump(){clearTimeout(idleT);if(ckey)idleT=setTimeout(lock,5*60e3)}
+function lock(){if(!ckey||localStorage.getItem('versun_session'))return;logout().then(()=>toast('Сеанс закрыт из-за бездействия. Войдите снова'))}
+function bump(){clearTimeout(idleT);if(ckey&&!localStorage.getItem('versun_session'))idleT=setTimeout(lock,5*60e3)}
 ['pointerdown','keydown','touchstart','scroll'].forEach(e=>addEventListener(e,bump,{passive:true,capture:true}));
-document.addEventListener('visibilitychange',()=>{clearTimeout(hideT);if(document.hidden&&ckey)hideT=setTimeout(lock,2*60e3)});
+document.addEventListener('visibilitychange',()=>{clearTimeout(hideT);if(document.hidden&&ckey&&!localStorage.getItem('versun_session'))hideT=setTimeout(lock,2*60e3)});
 async function changePw(){
   const o=$('#cp0').value,n=$('#cp1').value,n2=$('#cp2').value,rec=users()[user];
   try{const d=await derive(o,unb64(rec.salt),rec.iter||250000);if(d.verifier!==rec.verifier)return toast('Старый пароль неверный')}catch(e){return toast('Не удалось проверить пароль')}
@@ -338,7 +361,7 @@ async function changePw(){
   if(n!==n2)return toast('Новые пароли не совпадают');
   const ns=crypto.getRandomValues(new Uint8Array(16)),d=await derive(n,ns,600000),all=users();
   await queue;ckey=d.key;all[user]={salt:b64(ns),verifier:d.verifier,iter:600000};
-  await persist();localStorage.setItem('versun_users',JSON.stringify(all));
+  await persist();localStorage.setItem('versun_users',JSON.stringify(all));await storeSession();
   ['cp0','cp1','cp2'].forEach(i=>$('#'+i).value='');toast('Пароль изменён ✓')}
 function runCounts(){
   if(matchMedia('(prefers-reduced-motion:reduce)').matches)return;
@@ -652,6 +675,7 @@ function delAccount(){
   ckey=null;logout()}
 
 if('serviceWorker' in navigator&&location.protocol==='https:'){addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+addEventListener('load',()=>restoreSession());
 </script>
 </body>
 </html>
