@@ -604,10 +604,9 @@ function delCat(inc,i){const c=catList(inc)[i];if(!confirm('Удалить ка�
 async function ai(messages){
   const s=db.settings;
   if(!s.apiKey)throw new Error('Добавьте API-ключ в разделе «Профиль»');
-  const model=(s.model||'gemini-2.5-flash').trim();
-  const endpoint=(s.baseUrl||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,'')+'/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(s.apiKey);
-  const contents=[];
-  let systemText='';
+  const model=(s.model||'gemini-3.8-flash').trim();
+  const endpoint=(s.baseUrl||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,'')+'/models/'+encodeURIComponent(model)+':generateContent';
+  const contents=[];let systemText='';
   for(const m of messages){
     if(m.role==='system'){systemText+=String(m.content||'')+'\n';continue}
     const parts=[];
@@ -624,10 +623,19 @@ async function ai(messages){
   }
   if(systemText)contents.unshift({role:'user',parts:[{text:'Инструкции системы (соблюдай их):\n'+systemText}]});
   let r;
-  try{r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7}})})}
-  catch(e){throw new Error('Нет связи с Gemini. Проверьте интернет и адрес API в профиле')}
-  if(!r.ok){const t=await r.text();throw new Error(r.status===400?'Gemini отклонил запрос. Проверьте модель и формат запроса':r.status===403?'Gemini API-ключ не принят или API недоступен для этого ключа':'Ошибка Gemini '+r.status+': '+t.slice(0,180))}
-  const j=await r.json();const answer=j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts;
+  for(let attempt=0;attempt<4;attempt++){
+    try{r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':s.apiKey},body:JSON.stringify({contents,generationConfig:{temperature:0.7}})})}
+    catch(e){
+      if(attempt===3)throw new Error('Нет связи с Gemini после нескольких попыток. Проверьте интернет и повторите позже');
+      await new Promise(resolve=>setTimeout(resolve,700*Math.pow(2,attempt)+Math.random()*500));continue;
+    }
+    if(r.ok)break;
+    const status=r.status,body=await r.text();
+    if([408,429,500,502,503,504].includes(status)&&attempt<3){await new Promise(resolve=>setTimeout(resolve,900*Math.pow(2,attempt)+Math.random()*700));continue}
+    throw new Error(status===400?'Gemini отклонил запрос. Проверьте модель и формат запроса':status===401||status===403?'Gemini API-ключ не принят или API недоступен для этого ключа':([408,429,500,502,503,504].includes(status)?'Gemini временно перегружен (ошибка '+status+'). Попробуйте ещё раз через минуту.':'Ошибка Gemini '+status+': '+body.slice(0,180)));
+  }
+  if(!r||!r.ok)throw new Error('Gemini временно недоступен. Повторите запрос позже');
+  const j=await r.json(),answer=j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts;
   if(!answer)throw new Error('Gemini не вернул ответ. Возможно, сработало ограничение бесплатного тарифа');
   return answer.map(p=>p.text||'').join('').trim();
 }
@@ -685,6 +693,12 @@ function me(){
    <div class="two"><div><label>Адрес Gemini API</label><input id="sb" value="${esc(s.baseUrl)}"></div><div><label>Модель Gemini</label><input id="sm" value="${esc(s.model)}"></div></div>
    <div class="small mut" style="margin-top:10px">Ключ хранится только в вашем зашифрованном хранилище и уходит только на указанный адрес API. В код сайта его вставлять нельзя: на GitHub Pages он станет публичным.</div>
    <button class="btn full" onclick="saveAI()">Сохранить и проверить</button></div>
+  <div class="card"><h2>Установить приложение</h2>
+   <p class="small mut">Добавьте Versun на главный экран — приложение будет открываться в отдельном окне. Установка доступна в поддерживаемом браузере.</p>
+   <button class="btn full" id="installAppBtn" onclick="installVersun()">⬇️ Установить Versun</button>
+   <a class="btn ghost full" href="https://github.com/Xayrose/Versun/releases/latest/download/app-debug.apk" style="display:flex;text-decoration:none;margin-top:10px">Скачать APK для Android</a>
+   <div class="small mut" style="margin-top:10px">На iPhone: откройте меню «Поделиться» в Safari и выберите «На экран Домой». Если кнопка установки недоступна, используйте меню браузера.</div>
+   <div class="small mut" id="installAppStatus" style="margin-top:8px"></div></div>
   <div class="card"><h2>Безопасность</h2>
    <label>Старый пароль</label><input id="cp0" type="password" autocomplete="current-password">
    <label>Новый пароль</label><input id="cp1" type="password" autocomplete="new-password" placeholder="от 8 символов">
@@ -712,6 +726,19 @@ function delAccount(){
   ckey=null;logout()}
 
 if('serviceWorker' in navigator&&location.protocol==='https:'){addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+let versunInstallPrompt=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();versunInstallPrompt=e});
+async function installVersun(){
+  const status=document.getElementById('installAppStatus');
+  if(versunInstallPrompt){
+    versunInstallPrompt.prompt();const result=await versunInstallPrompt.userChoice;
+    if(status)status.textContent=result.outcome==='accepted'?'Установка запущена.':'Установка отменена.';
+    versunInstallPrompt=null;return;
+  }
+  if(window.matchMedia('(display-mode: standalone)').matches){if(status)status.textContent='Versun уже установлено на этом устройстве.';return}
+  if(status)status.textContent=/iPhone|iPad|iPod/i.test(navigator.userAgent)?'В Safari нажмите «Поделиться» → «На экран Домой».':'Откройте меню браузера и выберите «Установить приложение» или «Добавить на главный экран».';
+}
+addEventListener('appinstalled',()=>{const s=document.getElementById('installAppStatus');if(s)s.textContent='Versun установлено ✓';versunInstallPrompt=null});
 addEventListener('load',()=>restoreSession());
 </script>
 </body>
