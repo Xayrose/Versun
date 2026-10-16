@@ -271,7 +271,7 @@ const users=()=>{try{return JSON.parse(localStorage.getItem('versun_users')||'{}
 const defaults=()=>({
   profile:{kcal:2000,p:120,f:70,c:200,budget:0,cur:'₽'},cats:mkCats(),
   meals:[],tx:[],workouts:[],programs:[],plans:[],chat:[],
-  settings:{apiKey:'',baseUrl:'https://api.deepseek.com',model:'deepseek-chat'}
+  settings:{apiKey:'',baseUrl:'https://generativelanguage.googleapis.com/v1beta',model:'gemini-2.5-flash'}
 });
 
 /* ---------- auth ---------- */
@@ -453,8 +453,10 @@ function food(){
 }
 function addMeal(pre={}){
   openModal(`<h3>Добавить еду</h3>
-  <label>Название</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: овсянка с ягодами, 250 г">
-  <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Посчитать калории с ИИ</button>
+  <label>Название и порция</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: рис с курицей, примерно 300 г">
+  <label style="margin-top:10px">Фото блюда (необязательно)</label><input id="mealPhoto" type="file" accept="image/*" capture="environment">
+  <div class="small mut">Сфотографируйте блюдо или выберите снимок. Gemini оценит калории и БЖУ приблизительно.</div>
+  <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Оценить калории по описанию или фото</button>
   <div class="two"><div><label>Ккал</label><input id="mk" inputmode="decimal" value="${pre.kcal||''}"></div><div><label>Белки, г</label><input id="mp" inputmode="decimal" value="${pre.p||''}"></div>
   <div><label>Жиры, г</label><input id="mf" inputmode="decimal" value="${pre.f||''}"></div><div><label>Углеводы, г</label><input id="mc" inputmode="decimal" value="${pre.c||''}"></div></div>
   <label>Дата</label><input id="md" type="date" value="${view==='food'?fday:today()}">
@@ -464,14 +466,24 @@ function saveMeal(){
   db.meals.push({id:uid(),date:$('#md').value||today(),name,kcal:num($('#mk').value),p:num($('#mp').value),f:num($('#mf').value),c:num($('#mc').value)});
   save();closeModal();render()}
 async function estimateFood(){
-  const n=$('#mn').value.trim();if(!n){$('#merr').textContent='Опишите блюдо и порцию';return}
-  const b=$('#aiEst');b.disabled=true;b.textContent='Считаю…';
+  const n=$('#mn').value.trim(),file=$('#mealPhoto')&&$('#mealPhoto').files[0];
+  if(!n&&!file){$('#merr').textContent='Опишите блюдо или добавьте фото';return}
+  const b=$('#aiEst');b.disabled=true;b.textContent='Анализирую…';
   try{
-    const r=await ai([{role:'system',content:'Ты нутрициолог. Оцени калории и БЖУ блюда с указанной порцией. Ответь ТОЛЬКО JSON без пояснений: {"kcal":число,"p":число,"f":число,"c":число}'},{role:'user',content:n}]);
+    let content;
+    const prompt='Ты помощник по питанию. Оцени съедобную порцию блюда по описанию и/или фото. Если размер порции неизвестен, укажи разумное предположение и учти неопределённость. Верни ТОЛЬКО JSON без markdown: {"name":"краткое название блюда","kcal":число,"p":число,"f":число,"c":число}. Калории в ккал, БЖУ в граммах. Это приблизительная оценка, не медицинский совет.';
+    if(file){
+      if(!file.type.startsWith('image/'))throw new Error('Выберите файл изображения');
+      if(file.size>8*1024*1024)throw new Error('Фото должно быть меньше 8 МБ');
+      const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать фото'));reader.readAsDataURL(file)});
+      content=[{type:'text',text:prompt+'\nОписание пользователя: '+(n||'не указано')},{type:'image_url',image_url:{url:dataUrl}}];
+    }else content=prompt+'\nБлюдо и порция: '+n;
+    const r=await ai([{role:'user',content}]);
     const j=JSON.parse(r.match(/\{[\s\S]*\}/)[0]);
-    $('#mk').value=Math.round(j.kcal);$('#mp').value=Math.round(j.p);$('#mf').value=Math.round(j.f);$('#mc').value=Math.round(j.c);$('#merr').textContent='';
+    $('#mn').value=n||j.name||'Блюдо по фото';
+    $('#mk').value=Math.round(Number(j.kcal)||0);$('#mp').value=Math.round(Number(j.p)||0);$('#mf').value=Math.round(Number(j.f)||0);$('#mc').value=Math.round(Number(j.c)||0);$('#merr').textContent='Оценка приблизительная; уточните порцию для большей точности.';
   }catch(e){$('#merr').textContent=e.message||'Не удалось оценить'}
-  b.disabled=false;b.textContent='✨ Посчитать калории с ИИ'}
+  b.disabled=false;b.textContent='✨ Оценить калории по описанию или фото'}
 function planToDay(pid,n){const i=db.plans.find(p=>p.id===pid).items[n];db.meals.push({id:uid(),date:fday,name:i.name,kcal:i.kcal,p:i.p,f:i.f,c:i.c});save();render();toast('Добавлено в '+dateName(fday))}
 function editPlan(id){
   const p=db.plans.find(x=>x.id===id);
@@ -592,11 +604,32 @@ function delCat(inc,i){const c=catList(inc)[i];if(!confirm('Удалить ка�
 async function ai(messages){
   const s=db.settings;
   if(!s.apiKey)throw new Error('Добавьте API-ключ в разделе «Профиль»');
+  const model=(s.model||'gemini-2.5-flash').trim();
+  const endpoint=(s.baseUrl||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,'')+'/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(s.apiKey);
+  const contents=[];
+  let systemText='';
+  for(const m of messages){
+    if(m.role==='system'){systemText+=String(m.content||'')+'\n';continue}
+    const parts=[];
+    if(Array.isArray(m.content)){
+      for(const part of m.content){
+        if(part.type==='text')parts.push({text:part.text||''});
+        else if(part.type==='image_url'&&part.image_url&&part.image_url.url){
+          const mt=part.image_url.url.match(/^data:(image\/[\w.+-]+);base64,(.+)$/s);
+          if(mt)parts.push({inline_data:{mime_type:mt[1],data:mt[2]}});
+        }
+      }
+    }else parts.push({text:String(m.content||'')});
+    contents.push({role:m.role==='assistant'?'model':'user',parts});
+  }
+  if(systemText)contents.unshift({role:'user',parts:[{text:'Инструкции системы (соблюдай их):\n'+systemText}]});
   let r;
-  try{r=await fetch(s.baseUrl.replace(/\/$/,'')+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,messages,temperature:0.7})})}
-  catch(e){throw new Error('Нет связи с ИИ. Проверьте интернет и адрес API в профиле')}
-  if(!r.ok){const t=await r.text();throw new Error(r.status===401?'API-ключ не принят. Проверьте его в профиле':'Ошибка ИИ '+r.status+': '+t.slice(0,160))}
-  const j=await r.json();return j.choices[0].message.content;
+  try{r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7}})})}
+  catch(e){throw new Error('Нет связи с Gemini. Проверьте интернет и адрес API в профиле')}
+  if(!r.ok){const t=await r.text();throw new Error(r.status===400?'Gemini отклонил запрос. Проверьте модель и формат запроса':r.status===403?'Gemini API-ключ не принят или API недоступен для этого ключа':'Ошибка Gemini '+r.status+': '+t.slice(0,180))}
+  const j=await r.json();const answer=j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts;
+  if(!answer)throw new Error('Gemini не вернул ответ. Возможно, сработало ограничение бесплатного тарифа');
+  return answer.map(p=>p.text||'').join('').trim();
 }
 function context(){
   const g=db.profile,ym=today().slice(0,7),s=mstats(ym),pm=(()=>{const d=new Date();d.setMonth(d.getMonth()-1);return mstats(d.getFullYear()+'-'+pad(d.getMonth()+1))})();
@@ -648,8 +681,8 @@ function me(){
    <div><label>Бюджет на месяц</label><input id="gb" inputmode="numeric" value="${g.budget||''}" placeholder="0"></div><div><label>Валюта</label><input id="gu" maxlength="4" value="${esc(g.cur)}"></div></div>
    <button class="btn full" onclick="saveGoals()">Сохранить цели</button></div>
   <div class="card"><h2>Подключение ИИ</h2>
-   <label>API-ключ</label><input id="sk" type="password" autocomplete="off" value="${esc(s.apiKey)}" placeholder="sk-…">
-   <div class="two"><div><label>Адрес API</label><input id="sb" value="${esc(s.baseUrl)}"></div><div><label>Модель</label><input id="sm" value="${esc(s.model)}"></div></div>
+   <label>API-ключ</label><input id="sk" type="password" autocomplete="off" value="${esc(s.apiKey)}" placeholder="AIza…">
+   <div class="two"><div><label>Адрес Gemini API</label><input id="sb" value="${esc(s.baseUrl)}"></div><div><label>Модель Gemini</label><input id="sm" value="${esc(s.model)}"></div></div>
    <div class="small mut" style="margin-top:10px">Ключ хранится только в вашем зашифрованном хранилище и уходит только на указанный адрес API. В код сайта его вставлять нельзя: на GitHub Pages он станет публичным.</div>
    <button class="btn full" onclick="saveAI()">Сохранить и проверить</button></div>
   <div class="card"><h2>Безопасность</h2>
@@ -665,10 +698,10 @@ function saveGoals(){
   save();toast('Цели сохранены')}
 async function saveAI(){
   const bu=$('#sb').value.trim();if(bu&&!/^https:\/\/[^\s]+$/.test(bu))return toast('Адрес API должен начинаться с https://');
-  Object.assign(db.settings,{apiKey:$('#sk').value.trim(),baseUrl:(bu||'https://api.deepseek.com').replace(/\/$/,''),model:$('#sm').value.trim()||'deepseek-chat'});
+  Object.assign(db.settings,{apiKey:$('#sk').value.trim(),baseUrl:(bu||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,''),model:$('#sm').value.trim()||'gemini-2.5-flash'});
   await save();
-  toast(db.settings.apiKey?'Настройки ИИ сохранены на этом устройстве':'Настройки сохранены. Для запросов ИИ нужен API-ключ');
-  if(db.settings.apiKey){try{await ai([{role:'user',content:'Ответь одним словом: ок'}]);toast('ИИ подключён ✓')}catch(e){toast('Ключ сохранён, но ИИ не подключился: '+e.message)}}
+  toast(db.settings.apiKey?'Настройки Gemini сохранены на этом устройстве':'Настройки сохранены. Для запросов ИИ нужен API-ключ');
+  if(db.settings.apiKey){try{await ai([{role:'user',content:'Ответь одним словом: ок'}]);toast('Gemini подключён ✓')}catch(e){toast('Ключ сохранён, но Gemini не подключился: '+e.message)}}
 }
 function exportData(){
   const a=document.createElement('a');const copy=JSON.parse(JSON.stringify(db));copy.settings.apiKey='';
