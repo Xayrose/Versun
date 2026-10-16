@@ -266,7 +266,7 @@ async function persist(){
   const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},ckey,enc.encode(JSON.stringify(db)));
   localStorage.setItem('versun_data_'+user,JSON.stringify({iv:b64(iv),ct:b64(ct)}));
 }
-function save(){if(!ckey)return;queue=queue.then(persist).catch(()=>toast('Не удалось сохранить данные'))}
+function save(){if(!ckey)return;queue=queue.then(persist).catch(()=>toast('Не удалось сохранить данные'));return queue}
 const users=()=>{try{return JSON.parse(localStorage.getItem('versun_users')||'{}')}catch(e){return{}}};
 const defaults=()=>({
   profile:{kcal:2000,p:120,f:70,c:200,budget:0,cur:'₽'},cats:mkCats(),
@@ -665,9 +665,11 @@ function saveGoals(){
   save();toast('Цели сохранены')}
 async function saveAI(){
   const bu=$('#sb').value.trim();if(bu&&!/^https:\/\/[^\s]+$/.test(bu))return toast('Адрес API должен начинаться с https://');
-  Object.assign(db.settings,{apiKey:$('#sk').value.trim(),baseUrl:$('#sb').value.trim()||'https://api.deepseek.com',model:$('#sm').value.trim()||'deepseek-chat'});
-  save();
-  try{await ai([{role:'user',content:'Ответь одним словом: ок'}]);toast('ИИ подключён ✓')}catch(e){toast(e.message)}}
+  Object.assign(db.settings,{apiKey:$('#sk').value.trim(),baseUrl:(bu||'https://api.deepseek.com').replace(/\/$/,''),model:$('#sm').value.trim()||'deepseek-chat'});
+  await save();
+  toast(db.settings.apiKey?'Настройки ИИ сохранены на этом устройстве':'Настройки сохранены. Для запросов ИИ нужен API-ключ');
+  if(db.settings.apiKey){try{await ai([{role:'user',content:'Ответь одним словом: ок'}]);toast('ИИ подключён ✓')}catch(e){toast('Ключ сохранён, но ИИ не подключился: '+e.message)}}
+}
 function exportData(){
   const a=document.createElement('a');const copy=JSON.parse(JSON.stringify(db));copy.settings.apiKey='';
   a.href=URL.createObjectURL(new Blob([JSON.stringify(copy,null,2)],{type:'application/json'}));a.download='versun-'+user+'-'+today()+'.json';a.click();URL.revokeObjectURL(a.href)}
