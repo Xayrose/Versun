@@ -454,8 +454,10 @@ function food(){
 function addMeal(pre={}){
   openModal(`<h3>Добавить еду</h3>
   <label>Название и порция</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: рис с курицей, примерно 300 г">
-  <label style="margin-top:10px">Фото блюда (необязательно)</label><input id="mealPhoto" type="file" accept="image/*" capture="environment">
-  <div class="small mut">Сфотографируйте блюдо или выберите снимок. Gemini оценит калории и БЖУ приблизительно.</div>
+  <label style="margin-top:10px">Камера или фото (необязательно)</label>
+  <button class="btn ghost full" type="button" style="margin-top:6px" id="liveCam" onclick="captureFoodCamera()">📷 Открыть камеру и сразу отправить кадр</button>
+  <input id="mealPhoto" type="file" accept="image/*" capture="environment" style="margin-top:8px">
+  <div class="small mut">Разрешите доступ к камере: приложение автоматически отправит один текущий кадр на анализ — сохранять фото отдельно не нужно. Либо выберите фото ниже.</div>
   <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Оценить калории по описанию или фото</button>
   <div class="two"><div><label>Ккал</label><input id="mk" inputmode="decimal" value="${pre.kcal||''}"></div><div><label>Белки, г</label><input id="mp" inputmode="decimal" value="${pre.p||''}"></div>
   <div><label>Жиры, г</label><input id="mf" inputmode="decimal" value="${pre.f||''}"></div><div><label>Углеводы, г</label><input id="mc" inputmode="decimal" value="${pre.c||''}"></div></div>
@@ -465,14 +467,42 @@ function saveMeal(){
   const name=$('#mn').value.trim();if(!name){$('#merr').textContent='Введите название';return}
   db.meals.push({id:uid(),date:$('#md').value||today(),name,kcal:num($('#mk').value),p:num($('#mp').value),f:num($('#mf').value),c:num($('#mc').value)});
   save();closeModal();render()}
-async function estimateFood(){
+async function captureFoodCamera(){
+  const b=$('#liveCam'); if(!b)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('#merr').textContent='Камера недоступна в этом браузере. Используйте выбор фото ниже.';return}
+  b.disabled=true;b.textContent='Открываю камеру…';
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    const video=document.createElement('video');video.setAttribute('playsinline','');video.muted=true;video.srcObject=stream;
+    await new Promise((resolve,reject)=>{video.onloadedmetadata=resolve;video.onerror=()=>reject(new Error('Не удалось запустить камеру'));});
+    await video.play();
+    await new Promise(resolve=>setTimeout(resolve,700));
+    if(!video.videoWidth||!video.videoHeight)throw new Error('Камера не передала изображение. Попробуйте ещё раз.');
+    const canvas=document.createElement('canvas'),scale=Math.min(1,1280/video.videoWidth);
+    canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    const dataUrl=canvas.toDataURL('image/jpeg',0.82);
+    stream.getTracks().forEach(t=>t.stop());stream=null;
+    b.textContent='Отправляю кадр на анализ…';
+    await estimateFood(dataUrl);
+  }catch(e){
+    $('#merr').textContent=e.name==='NotAllowedError'?'Разрешите доступ к камере в настройках браузера и попробуйте снова.':(e.message||'Не удалось открыть камеру');
+  }finally{
+    if(stream)stream.getTracks().forEach(t=>t.stop());
+    b.disabled=false;b.textContent='📷 Открыть камеру и сразу отправить кадр';
+  }
+}
+async function estimateFood(cameraDataUrl){
   const n=$('#mn').value.trim(),file=$('#mealPhoto')&&$('#mealPhoto').files[0];
   if(!n&&!file){$('#merr').textContent='Опишите блюдо или добавьте фото';return}
   const b=$('#aiEst');b.disabled=true;b.textContent='Анализирую…';
   try{
     let content;
     const prompt='Ты помощник по питанию. Оцени съедобную порцию блюда по описанию и/или фото. Если размер порции неизвестен, укажи разумное предположение и учти неопределённость. Верни ТОЛЬКО JSON без markdown: {"name":"краткое название блюда","kcal":число,"p":число,"f":число,"c":число}. Калории в ккал, БЖУ в граммах. Это приблизительная оценка, не медицинский совет.';
-    if(file){
+    if(cameraDataUrl){
+      content=[{type:'text',text:prompt+'\nОписание пользователя: '+(n||'не указано')},{type:'image_url',image_url:{url:cameraDataUrl}}];
+    }else if(file){
       if(!file.type.startsWith('image/'))throw new Error('Выберите файл изображения');
       if(file.size>8*1024*1024)throw new Error('Фото должно быть меньше 8 МБ');
       const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать фото'));reader.readAsDataURL(file)});
