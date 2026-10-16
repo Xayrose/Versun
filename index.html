@@ -605,7 +605,7 @@ async function ai(messages){
   const s=db.settings;
   if(!s.apiKey)throw new Error('Добавьте API-ключ в разделе «Профиль»');
   const model=(s.model||'gemini-2.5-flash').trim();
-  const endpoint=(s.baseUrl||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,'')+'/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(s.apiKey);
+  const endpoint=(s.baseUrl||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,'')+'/models/'+encodeURIComponent(model)+':generateContent';
   const contents=[];
   let systemText='';
   for(const m of messages){
@@ -624,7 +624,7 @@ async function ai(messages){
   }
   if(systemText)contents.unshift({role:'user',parts:[{text:'Инструкции системы (соблюдай их):\n'+systemText}]});
   let r;
-  try{r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7}})})}
+  try{r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':s.apiKey},body:JSON.stringify({contents,generationConfig:{temperature:0.7}})})}
   catch(e){throw new Error('Нет связи с Gemini. Проверьте интернет и адрес API в профиле')}
   if(!r.ok){const t=await r.text();throw new Error(r.status===400?'Gemini отклонил запрос. Проверьте модель и формат запроса':r.status===403?'Gemini API-ключ не принят или API недоступен для этого ключа':'Ошибка Gemini '+r.status+': '+t.slice(0,180))}
   const j=await r.json();const answer=j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts;
