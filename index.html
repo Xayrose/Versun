@@ -495,7 +495,7 @@ async function captureFoodCamera(){
 }
 async function estimateFood(cameraDataUrl){
   const n=$('#mn').value.trim(),file=$('#mealPhoto')&&$('#mealPhoto').files[0];
-  if(!n&&!file){$('#merr').textContent='Опишите блюдо или добавьте фото';return}
+  if(!n&&!file&&!cameraDataUrl){$('#merr').textContent='Опишите блюдо или добавьте фото';return}
   const b=$('#aiEst');b.disabled=true;b.textContent='Анализирую…';
   try{
     let content;
