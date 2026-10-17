@@ -210,6 +210,21 @@ nav button.on span{animation:pop2 .55s cubic-bezier(.2,.9,.3,1.2)}
 .btn:active,.quick button:active,.chip:active,.cp:active,.mon button:active,.x:active{transform:scale(.93)}
 @media(hover:hover){.btn:hover,.quick button:hover,.chip:hover{filter:brightness(1.12)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+/* iOS 26-inspired liquid glass */
+:root{--bg:#080b12;--tx:#f7f8ff;--mut:#b6bfd2;--line:rgba(255,255,255,.22);--glass:linear-gradient(145deg,rgba(255,255,255,.24),rgba(255,255,255,.075) 48%,rgba(255,255,255,.13));--gs:inset 0 1px 0 rgba(255,255,255,.5),inset 0 -1px 0 rgba(255,255,255,.1),0 16px 42px rgba(0,0,0,.25)}
+body{background:radial-gradient(120% 90% at 0% 0%,#263a5e 0,transparent 52%),radial-gradient(100% 70% at 100% 20%,#423063 0,transparent 55%),#080b12}
+.bg{background:radial-gradient(120% 90% at 10% 0%,rgba(70,119,180,.35),transparent 55%),radial-gradient(90% 80% at 100% 30%,rgba(155,113,220,.24),transparent 58%),#080b12}
+.card,.authbox,.modalbox,.nav,.panel,.tile,.stat,.item,.bubble{backdrop-filter:blur(32px) saturate(175%);-webkit-backdrop-filter:blur(32px) saturate(175%);border-color:rgba(255,255,255,.2)!important;box-shadow:var(--gs),0 18px 50px rgba(0,0,0,.16)}
+button,.btn{transition:transform .18s ease,filter .18s ease}
+button:active,.btn:active{transform:scale(.975)}
+.btn{border:1px solid rgba(255,255,255,.22);box-shadow:inset 0 1px rgba(255,255,255,.22),0 6px 20px rgba(0,0,0,.16)}
+input,select,textarea{background:rgba(255,255,255,.075)!important;border-color:rgba(255,255,255,.19)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.camera-actions{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+.camera-actions>*{flex:1;min-width:130px}
+.food-camera-panel{margin-top:12px;padding:10px;border:1px solid rgba(255,255,255,.22);border-radius:24px;background:rgba(255,255,255,.09);box-shadow:inset 0 1px rgba(255,255,255,.25),0 12px 30px rgba(0,0,0,.22);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px)}
+.food-camera-panel video{display:block;width:100%;max-height:55vh;object-fit:cover;border-radius:17px;background:#000}
+@supports not ((backdrop-filter:blur(1px))){.card,.authbox,.modalbox,.food-camera-panel{background:rgba(25,30,45,.96)}}
 </style>
 </head>
 <body>
@@ -463,60 +478,93 @@ function food(){
 function addMeal(pre={}){
   openModal(`<h3>Добавить еду</h3>
   <label>Название и порция</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: рис с курицей, примерно 300 г">
-  <label style="margin-top:10px">Фото еды</label>
-  <button class="btn full" type="button" style="margin-top:6px" id="liveCam" onclick="captureFoodCamera()">📷 Сфотографировать еду</button>
-  <div class="small mut" style="margin-top:8px">Камера откроется прямо в приложении. Снимок автоматически отправится на анализ калорий и БЖУ — загружать файлы или переходить на другие сайты не нужно.</div>
+  <label style="margin-top:10px">Сфотографировать еду</label>
+  <div class="camera-actions">
+    <button class="btn full" type="button" id="siteCamBtn" onclick="openSiteFoodCamera()">◉ Камера сайта</button>
+    <button class="btn ghost full" type="button" id="appCamBtn" onclick="openAppFoodCamera()">▣ Камера приложения</button>
+  </div>
+  <div class="small mut" style="margin-top:8px">«Камера сайта» показывает живое изображение здесь. «Камера приложения» открывает камеру устройства, если браузер или установленное приложение поддерживает захват.</div>
+  <div id="foodCameraPanel" class="food-camera-panel" hidden>
+    <video id="foodCameraVideo" autoplay playsinline muted></video>
+    <div class="camera-actions"><button class="btn full" type="button" onclick="takeSiteFoodPhoto()">📸 Снять фото</button><button class="btn ghost" type="button" onclick="closeSiteFoodCamera()">Закрыть</button></div>
+  </div>
+  <input id="appFoodCapture" type="file" accept="image/*" capture="environment" hidden onchange="handleAppFoodPhoto(event)">
+  <div class="small mut" id="cameraStatus" aria-live="polite" style="margin-top:8px"></div>
   <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Оценить по описанию</button>
   <div class="two"><div><label>Ккал</label><input id="mk" inputmode="decimal" value="${pre.kcal||''}"></div><div><label>Белки, г</label><input id="mp" inputmode="decimal" value="${pre.p||''}"></div>
   <div><label>Жиры, г</label><input id="mf" inputmode="decimal" value="${pre.f||''}"></div><div><label>Углеводы, г</label><input id="mc" inputmode="decimal" value="${pre.c||''}"></div></div>
   <label>Дата</label><input id="md" type="date" value="${view==='food'?fday:today()}">
-  <div class="err" id="merr"></div><button class="btn full" onclick="saveMeal()">Сохранить</button>`)}
-function saveMeal(){
-  const name=$('#mn').value.trim();if(!name){$('#merr').textContent='Введите название';return}
-  db.meals.push({id:uid(),date:$('#md').value||today(),name,kcal:num($('#mk').value),p:num($('#mp').value),f:num($('#mf').value),c:num($('#mc').value)});
-  save();closeModal();render()}
-async function captureFoodCamera(){
-  const b=$('#liveCam'); if(!b)return;
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('#merr').textContent='Камера недоступна. Откройте приложение в браузере с разрешением камеры через HTTPS.';return}
-  b.disabled=true;b.textContent='Открываю камеру…';
-  let stream;
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-    const video=document.createElement('video');video.setAttribute('playsinline','');video.muted=true;video.srcObject=stream;
-    await new Promise((resolve,reject)=>{video.onloadedmetadata=resolve;video.onerror=()=>reject(new Error('Не удалось запустить камеру'));});
-    await video.play();
-    await new Promise(resolve=>setTimeout(resolve,700));
-    if(!video.videoWidth||!video.videoHeight)throw new Error('Камера не передала изображение. Попробуйте ещё раз.');
-    const canvas=document.createElement('canvas'),scale=Math.min(1,1280/video.videoWidth);
-    canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
-    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
-    const dataUrl=canvas.toDataURL('image/jpeg',0.82);
-    stream.getTracks().forEach(t=>t.stop());stream=null;
-    b.textContent='Отправляю кадр на анализ…';
-    await estimateFood(dataUrl);
-  }catch(e){
-    $('#merr').textContent=e.name==='NotAllowedError'?'Разрешите доступ к камере в настройках браузера и попробуйте снова.':(e.message||'Не удалось открыть камеру');
-  }finally{
-    if(stream)stream.getTracks().forEach(t=>t.stop());
-    b.disabled=false;b.textContent='📷 Сфотографировать еду';
+  <div class="err" id="merr"></div><button class="btn full" onclick="saveMeal()">Сохранить</button>`);
+}
+function stopFoodCameraStream(){
+  const video=$('#foodCameraVideo');
+  if(video&&video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop());video.srcObject=null}
+}
+async function openSiteFoodCamera(){
+  const panel=$('#foodCameraPanel'),video=$('#foodCameraVideo'),status=$('#cameraStatus');
+  if(!panel||!video)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    status.textContent='Прямая камера недоступна в этом режиме. Используй «Камера приложения».';
+    return;
   }
+  try{
+    closeSiteFoodCamera();panel.hidden=false;status.textContent='Запрашиваю разрешение камеры…';
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    video.srcObject=stream;await video.play();status.textContent='Камера включена. Наведи её на блюдо и нажми «Снять фото».';
+  }catch(e){
+    panel.hidden=true;
+    status.textContent=e.name==='NotAllowedError'?'Доступ запрещён. Разреши камеру для Versun в настройках браузера/приложения.':(e.message||'Не удалось открыть камеру. Попробуй «Камера приложения».');
+  }
+}
+function closeSiteFoodCamera(){
+  stopFoodCameraStream();
+  const panel=$('#foodCameraPanel');if(panel)panel.hidden=true;
+}
+async function takeSiteFoodPhoto(){
+  const video=$('#foodCameraVideo');
+  if(!video||!video.videoWidth){$('#cameraStatus').textContent='Подожди, пока камера запустится.';return}
+  const canvas=document.createElement('canvas'),scale=Math.min(1,1280/video.videoWidth);
+  canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
+  canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+  const dataUrl=canvas.toDataURL('image/jpeg',0.86);
+  closeSiteFoodCamera();
+  await estimateFood(dataUrl);
+}
+function openAppFoodCamera(){
+  const input=$('#appFoodCapture');
+  if(!input){$('#cameraStatus').textContent='Камера устройства недоступна.';return}
+  input.click();
+}
+async function handleAppFoodPhoto(event){
+  const file=event.target.files&&event.target.files[0];if(!file)return;
+  try{
+    if(!file.type.startsWith('image/'))throw new Error('Камера не вернула изображение.');
+    if(file.size>12*1024*1024)throw new Error('Фото слишком большое. Попробуй сделать снимок ещё раз.');
+    const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать снимок'));reader.readAsDataURL(file)});
+    $('#cameraStatus').textContent='Фото получено. Анализирую калории и БЖУ…';
+    await estimateFood(dataUrl);
+  }catch(e){$('#merr').textContent=e.message||'Не удалось обработать фото'}
+  finally{event.target.value=''}
 }
 async function estimateFood(cameraDataUrl){
   const n=$('#mn').value.trim();
-  if(!n&&!cameraDataUrl){$('#merr').textContent='Сфотографируйте еду или опишите блюдо';return}
-  const b=$('#aiEst');b.disabled=true;b.textContent='Анализирую…';
+  if(!n&&!cameraDataUrl){$('#merr').textContent='Сфотографируй еду или опиши блюдо';return}
+  const b=$('#aiEst');if(b){b.disabled=true;b.textContent='Анализирую…'}
   try{
     let content;
     const prompt='Ты помощник по питанию. Оцени съедобную порцию блюда по описанию и/или фото. Если размер порции неизвестен, укажи разумное предположение и учти неопределённость. Верни ТОЛЬКО JSON без markdown: {"name":"краткое название блюда","kcal":число,"p":число,"f":число,"c":число}. Калории в ккал, БЖУ в граммах. Это приблизительная оценка, не медицинский совет.';
-    if(cameraDataUrl){
-      content=[{type:'text',text:prompt+'\nОписание пользователя: '+(n||'не указано')},{type:'image_url',image_url:{url:cameraDataUrl}}];
-    }else content=prompt+'\nБлюдо и порция: '+n;
+    if(cameraDataUrl)content=[{type:'text',text:prompt+'\nОписание пользователя: '+(n||'не указано')},{type:'image_url',image_url:{url:cameraDataUrl}}];
+    else content=prompt+'\nБлюдо и порция: '+n;
     const r=await ai([{role:'user',content}]);
-    const j=JSON.parse(r.match(/\{[\s\S]*\}/)[0]);
+    const match=r.match(/\{[\s\S]*\}/);if(!match)throw new Error('ИИ вернул ответ в неожиданном формате. Попробуй ещё раз.');
+    const j=JSON.parse(match[0]);
     $('#mn').value=n||j.name||'Блюдо по фото';
-    $('#mk').value=Math.round(Number(j.kcal)||0);$('#mp').value=Math.round(Number(j.p)||0);$('#mf').value=Math.round(Number(j.f)||0);$('#mc').value=Math.round(Number(j.c)||0);$('#merr').textContent='Оценка приблизительная; уточните порцию для большей точности.';
+    $('#mk').value=Math.round(Number(j.kcal)||0);$('#mp').value=Math.round(Number(j.p)||0);$('#mf').value=Math.round(Number(j.f)||0);$('#mc').value=Math.round(Number(j.c)||0);
+    $('#merr').textContent='Оценка приблизительная; уточни размер порции для большей точности.';
+    const status=$('#cameraStatus');if(status)status.textContent='Фото проанализировано. Проверь значения и нажми «Сохранить».';
   }catch(e){$('#merr').textContent=e.message||'Не удалось оценить'}
-  b.disabled=false;b.textContent='✨ Оценить калории по описанию или фото'}
+  finally{if(b){b.disabled=false;b.textContent='✨ Оценить по описанию'}}
+}
 function planToDay(pid,n){const i=db.plans.find(p=>p.id===pid).items[n];db.meals.push({id:uid(),date:fday,name:i.name,kcal:i.kcal,p:i.p,f:i.f,c:i.c});save();render();toast('Добавлено в '+dateName(fday))}
 function editPlan(id){
   const p=db.plans.find(x=>x.id===id);
