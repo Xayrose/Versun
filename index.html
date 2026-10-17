@@ -479,16 +479,12 @@ function addMeal(pre={}){
   openModal(`<h3>Добавить еду</h3>
   <label>Название и порция</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: рис с курицей, примерно 300 г">
   <label style="margin-top:10px">Сфотографировать еду</label>
-  <div class="camera-actions">
-    <button class="btn full" type="button" id="siteCamBtn" onclick="openSiteFoodCamera()">◉ Камера сайта</button>
-    <button class="btn ghost full" type="button" id="appCamBtn" onclick="openAppFoodCamera()">▣ Камера приложения</button>
-  </div>
-  <div class="small mut" style="margin-top:8px">«Камера сайта» показывает живое изображение здесь. «Камера приложения» открывает камеру устройства, если браузер или установленное приложение поддерживает захват.</div>
+  <button class="btn full" type="button" id="siteCamBtn" onclick="openSiteFoodCamera()">📷 Открыть камеру</button>
+  <div class="small mut" style="margin-top:8px">Нажми кнопку и разреши Versun доступ к камере. После разрешения наведи камеру на блюдо и сделай снимок.</div>
   <div id="foodCameraPanel" class="food-camera-panel" hidden>
     <video id="foodCameraVideo" autoplay playsinline muted></video>
     <div class="camera-actions"><button class="btn full" type="button" onclick="takeSiteFoodPhoto()">📸 Снять фото</button><button class="btn ghost" type="button" onclick="closeSiteFoodCamera()">Закрыть</button></div>
   </div>
-  <input id="appFoodCapture" type="file" accept="image/*" capture="environment" hidden onchange="handleAppFoodPhoto(event)">
   <div class="small mut" id="cameraStatus" aria-live="polite" style="margin-top:8px"></div>
   <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Оценить по описанию</button>
   <div class="two"><div><label>Ккал</label><input id="mk" inputmode="decimal" value="${pre.kcal||''}"></div><div><label>Белки, г</label><input id="mp" inputmode="decimal" value="${pre.p||''}"></div>
@@ -504,7 +500,7 @@ async function openSiteFoodCamera(){
   const panel=$('#foodCameraPanel'),video=$('#foodCameraVideo'),status=$('#cameraStatus');
   if(!panel||!video)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    status.textContent='Прямая камера недоступна в этом режиме. Используй «Камера приложения».';
+    status.textContent='Камера недоступна в этом режиме. Открой сайт Versun по HTTPS в Safari или Chrome и попробуй снова.';
     return;
   }
   try{
@@ -513,7 +509,7 @@ async function openSiteFoodCamera(){
     video.srcObject=stream;await video.play();status.textContent='Камера включена. Наведи её на блюдо и нажми «Снять фото».';
   }catch(e){
     panel.hidden=true;
-    status.textContent=e.name==='NotAllowedError'?'Доступ запрещён. Разреши камеру для Versun в настройках браузера/приложения.':(e.message||'Не удалось открыть камеру. Попробуй «Камера приложения».');
+    status.textContent=e.name==='NotAllowedError'?'Доступ к камере запрещён. Разреши камеру для Versun в настройках браузера/устройства и нажми кнопку снова.':e.name==='NotFoundError'?'Камера не найдена на устройстве.':e.name==='NotReadableError'?'Камера занята другим приложением. Закрой его и попробуй снова.':(e.message||'Не удалось открыть камеру. Проверь разрешение камеры и попробуй снова.');
   }
 }
 function closeSiteFoodCamera(){
@@ -529,22 +525,6 @@ async function takeSiteFoodPhoto(){
   const dataUrl=canvas.toDataURL('image/jpeg',0.86);
   closeSiteFoodCamera();
   await estimateFood(dataUrl);
-}
-function openAppFoodCamera(){
-  const input=$('#appFoodCapture');
-  if(!input){$('#cameraStatus').textContent='Камера устройства недоступна.';return}
-  input.click();
-}
-async function handleAppFoodPhoto(event){
-  const file=event.target.files&&event.target.files[0];if(!file)return;
-  try{
-    if(!file.type.startsWith('image/'))throw new Error('Камера не вернула изображение.');
-    if(file.size>12*1024*1024)throw new Error('Фото слишком большое. Попробуй сделать снимок ещё раз.');
-    const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать снимок'));reader.readAsDataURL(file)});
-    $('#cameraStatus').textContent='Фото получено. Анализирую калории и БЖУ…';
-    await estimateFood(dataUrl);
-  }catch(e){$('#merr').textContent=e.message||'Не удалось обработать фото'}
-  finally{event.target.value=''}
 }
 async function estimateFood(cameraDataUrl){
   const n=$('#mn').value.trim();
