@@ -11,6 +11,7 @@
         android:roundIcon="@drawable/ic_versun"
         android:allowBackup="false"
         android:supportsRtl="true">
+        <receiver android:name=".ReminderReceiver" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
