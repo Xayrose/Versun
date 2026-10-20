@@ -337,7 +337,7 @@ async function submitAuth(e){
     }
     $('#p').value=$('#p2').value='';
     await storeSession();
-    $('#auth').hidden=true;$('#app').hidden=false;bump();go('home');
+    $('#auth').hidden=true;$('#app').hidden=false;bump();go('home');scheduleTrainingReminder();
   }catch(ex){err('Ошибка входа. Проверьте данные и попробуйте ещё раз')}
   finally{$('#authBtn').disabled=false;$('#authBtn').textContent=mode==='reg'?'Создать аккаунт':'Войти'}
   return false;
