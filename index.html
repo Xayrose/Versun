@@ -476,42 +476,50 @@ function food(){
       <div style="display:flex;gap:8px;margin-top:8px"><button class="btn sm ghost" onclick="editPlan('${p.id}')">Изменить</button><button class="btn sm danger" onclick="if(confirm('Удалить программу?'))delItem('plans','${p.id}')">Удалить</button></div></details>`).join(''):'<div class="empty">Добавьте свою программу питания или попросите ИИ составить её.</div>'}</div>`;
 }
 function addMeal(pre={}){
-  openModal(`<h3>Добавить еду</h3>
-  <label>Название и порция</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: рис с курицей, примерно 300 г">
-  <label style="margin-top:10px">Сфотографировать еду</label>
-  <button class="btn full" type="button" id="siteCamBtn" onclick="openSiteFoodCamera()">📷 Открыть камеру</button>
-  <div class="small mut" style="margin-top:8px">Нажми кнопку и разреши Versun доступ к камере. После разрешения наведи камеру на блюдо и сделай снимок.</div>
-  <div id="foodCameraPanel" class="food-camera-panel" hidden>
-    <video id="foodCameraVideo" autoplay playsinline muted></video>
-    <div class="camera-actions"><button class="btn full" type="button" onclick="takeSiteFoodPhoto()">📸 Снять фото</button><button class="btn ghost" type="button" onclick="closeSiteFoodCamera()">Закрыть</button></div>
-  </div>
-  <div class="small mut" id="cameraStatus" aria-live="polite" style="margin-top:8px"></div>
-  <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Оценить по описанию</button>
-  <div class="two"><div><label>Ккал</label><input id="mk" inputmode="decimal" value="${pre.kcal||''}"></div><div><label>Белки, г</label><input id="mp" inputmode="decimal" value="${pre.p||''}"></div>
-  <div><label>Жиры, г</label><input id="mf" inputmode="decimal" value="${pre.f||''}"></div><div><label>Углеводы, г</label><input id="mc" inputmode="decimal" value="${pre.c||''}"></div></div>
+  openModal(`<h3>Добавить приём пищи</h3>
+  <label>Что ты ел и примерная порция</label><input id="mn" value="${esc(pre.name||'')}" placeholder="Например: рис с курицей, 300 г">
+  <label style="margin-top:10px">Фото блюда (необязательно)</label>
+  <button class="btn full" type="button" id="foodCameraBtn" onclick="openFoodCamera()">📸 Открыть камеру</button>
+  <div id="foodCameraPanel" class="food-camera-panel" hidden><video id="foodCameraVideo" autoplay playsinline muted></video>
+    <div class="camera-actions"><button class="btn full" type="button" onclick="takeSiteFoodPhoto()">Снять фото</button><button class="btn ghost" type="button" onclick="closeSiteFoodCamera()">Закрыть</button></div></div>
+  <input id="appFoodCapture" type="file" accept="image/*" capture="environment" hidden onchange="handleAppFoodPhoto(event)">
+  <div class="small mut" id="cameraStatus" aria-live="polite" style="margin-top:8px">Можно сохранить приём пищи и без фото.</div>
+  <button class="btn ghost sm" style="margin-top:10px" id="aiEst" onclick="estimateFood()">✨ Оценить калории с ИИ</button>
+  <div class="two"><div><label>Ккал</label><input id="mk" inputmode="decimal" value="${pre.kcal||''}" placeholder="0"></div><div><label>Белки, г</label><input id="mp" inputmode="decimal" value="${pre.p||''}" placeholder="0"></div>
+  <div><label>Жиры, г</label><input id="mf" inputmode="decimal" value="${pre.f||''}" placeholder="0"></div><div><label>Углеводы, г</label><input id="mc" inputmode="decimal" value="${pre.c||''}" placeholder="0"></div></div>
   <label>Дата</label><input id="md" type="date" value="${view==='food'?fday:today()}">
-  <div class="err" id="merr"></div><button class="btn full" onclick="saveMeal()">Сохранить</button>`);
+  <div class="err" id="merr"></div><button class="btn full" type="button" onclick="saveMeal()">Сохранить приём пищи</button>`);
+}
+function saveMeal(){
+  const name=$('#mn').value.trim(),err=$('#merr');
+  if(!name){err.textContent='Напиши, что ты ел, чтобы сохранить приём пищи.';$('#mn').focus();return}
+  const date=$('#md').value||today();
+  db.meals.push({id:uid(),date,name,kcal:num($('#mk').value),p:num($('#mp').value),f:num($('#mf').value),c:num($('#mc').value)});
+  fday=date;save();closeSiteFoodCamera();closeModal();render();toast('🍽️ Приём пищи сохранён');
+}
+async function openFoodCamera(){
+  const status=$('#cameraStatus'),panel=$('#foodCameraPanel'),video=$('#foodCameraVideo');
+  if(!status||!panel||!video)return;
+  if(!window.isSecureContext){status.textContent='Камера требует защищённого HTTPS-адреса.';return}
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){
+    try{
+      closeSiteFoodCamera();panel.hidden=false;status.textContent='Разреши Versun доступ к камере…';
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+      video.srcObject=stream;await video.play();status.textContent='Камера включена. Наведи на блюдо и нажми «Снять фото».';return;
+    }catch(e){
+      closeSiteFoodCamera();
+      if(e.name==='NotAllowedError'||e.name==='SecurityError'){status.textContent='Доступ запрещён. Разреши камеру для Versun в настройках сайта и попробуй снова.';return}
+    }
+  }
+  const input=$('#appFoodCapture');
+  if(input){status.textContent='Открываю камеру устройства…';input.click()}
+  else status.textContent='Камера недоступна. Проверь разрешение в настройках устройства.';
 }
 function stopFoodCameraStream(){
   const video=$('#foodCameraVideo');
   if(video&&video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop());video.srcObject=null}
 }
-async function openSiteFoodCamera(){
-  const panel=$('#foodCameraPanel'),video=$('#foodCameraVideo'),status=$('#cameraStatus');
-  if(!panel||!video)return;
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    status.textContent='Камера недоступна в этом режиме. Открой сайт Versun по HTTPS в Safari или Chrome и попробуй снова.';
-    return;
-  }
-  try{
-    closeSiteFoodCamera();panel.hidden=false;status.textContent='Запрашиваю разрешение камеры…';
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-    video.srcObject=stream;await video.play();status.textContent='Камера включена. Наведи её на блюдо и нажми «Снять фото».';
-  }catch(e){
-    panel.hidden=true;
-    status.textContent=e.name==='NotAllowedError'?'Доступ к камере запрещён. Разреши камеру для Versun в настройках браузера/устройства и нажми кнопку снова.':e.name==='NotFoundError'?'Камера не найдена на устройстве.':e.name==='NotReadableError'?'Камера занята другим приложением. Закрой его и попробуй снова.':(e.message||'Не удалось открыть камеру. Проверь разрешение камеры и попробуй снова.');
-  }
-}
+async function openSiteFoodCamera(){return openFoodCamera()}
 function closeSiteFoodCamera(){
   stopFoodCameraStream();
   const panel=$('#foodCameraPanel');if(panel)panel.hidden=true;
@@ -749,6 +757,12 @@ function me(){
    <div><label>Жиры, г</label><input id="gf" inputmode="numeric" value="${g.f}"></div><div><label>Углеводы, г</label><input id="gc" inputmode="numeric" value="${g.c}"></div>
    <div><label>Бюджет на месяц</label><input id="gb" inputmode="numeric" value="${g.budget||''}" placeholder="0"></div><div><label>Валюта</label><input id="gu" maxlength="4" value="${esc(g.cur)}"></div></div>
    <button class="btn full" onclick="saveGoals()">Сохранить цели</button></div>
+  <div class="card"><h2>🔔 Напоминание о тренировке</h2>
+   <p class="small mut">Укажи время начала — Versun напомнит за час. Для уведомлений нужно разрешение.</p>
+   <label>Время тренировки</label><input id="trainingTime" type="time" value="${esc(s.trainingTime||'18:00')}">
+   <label style="display:flex;align-items:center;gap:9px"><input id="trainingReminderOn" type="checkbox" ${s.trainingReminderOn===false?'':'checked'} style="width:auto"> Включить напоминание</label>
+   <button class="btn full" onclick="saveTrainingReminder()">🔔 Сохранить напоминание</button>
+   <div class="small mut" id="trainingReminderStatus" style="margin-top:8px"></div></div>
   <div class="card"><h2>Подключение ИИ</h2>
    <label>API-ключ</label><input id="sk" type="password" autocomplete="off" value="${esc(s.apiKey)}" placeholder="AIza…">
    <div class="two"><div><label>Адрес Gemini API</label><input id="sb" value="${esc(s.baseUrl)}"></div><div><label>Модель Gemini</label><input id="sm" value="${esc(s.model)}"></div></div>
@@ -771,6 +785,35 @@ function me(){
 function saveGoals(){
   Object.assign(db.profile,{kcal:num($('#gk').value)||2000,p:num($('#gp').value),f:num($('#gf').value),c:num($('#gc').value),budget:num($('#gb').value),cur:$('#gu').value.trim()||'₽'});
   save();toast('Цели сохранены')}
+let trainingReminderTimer=null;
+async function saveTrainingReminder(){
+  const time=$('#trainingTime')?.value||'18:00',enabled=!!$('#trainingReminderOn')?.checked,status=$('#trainingReminderStatus');
+  db.settings.trainingTime=time;db.settings.trainingReminderOn=enabled;
+  if(enabled&&'Notification' in window&&Notification.permission==='default'){try{await Notification.requestPermission()}catch(e){}}
+  if(enabled&&(!('Notification' in window)||Notification.permission!=='granted')){
+    if(status)status.textContent='Уведомления не разрешены. Разреши их в настройках браузера для Versun.';
+    await save();return;
+  }
+  await save();scheduleTrainingReminder();
+  if(status)status.textContent=enabled?'Сохранено! Напомним за час, пока Versun открыто.':'Напоминание выключено.';
+  toast(enabled?'🔔 Напоминание о тренировке сохранено':'Напоминание выключено');
+}
+function scheduleTrainingReminder(){
+  clearTimeout(trainingReminderTimer);trainingReminderTimer=null;
+  if(!db||!db.settings||db.settings.trainingReminderOn===false||!db.settings.trainingTime||!('Notification' in window)||Notification.permission!=='granted')return;
+  const [h,m]=db.settings.trainingTime.split(':').map(Number),now=new Date(),target=new Date();
+  target.setHours(h,m,0,0);target.setTime(target.getTime()-3600000);
+  if(target<=now)target.setDate(target.getDate()+1);
+  const delay=target.getTime()-now.getTime();if(delay>2147480000)return;
+  trainingReminderTimer=setTimeout(()=>{
+    const title='Пора готовиться 💪';
+    const options={body:'До тренировки остался 1 час. Подготовь воду, форму и настройся на результат!',icon:'icon-180.png',tag:'versun-training-reminder'};
+    if('serviceWorker' in navigator)navigator.serviceWorker.ready.then(reg=>reg.showNotification(title,options)).catch(()=>new Notification(title,options));
+    else new Notification(title,options);
+    scheduleTrainingReminder();
+  },delay);
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleTrainingReminder()});
 async function saveAI(){
   const bu=$('#sb').value.trim();if(bu&&!/^https:\/\/[^\s]+$/.test(bu))return toast('Адрес API должен начинаться с https://');
   Object.assign(db.settings,{apiKey:$('#sk').value.trim(),baseUrl:(bu||'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/,''),model:$('#sm').value.trim()||'gemini-2.5-flash'});
