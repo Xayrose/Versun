@@ -27,8 +27,8 @@ public class ReminderReceiver extends BroadcastReceiver {
             : new Notification.Builder(context);
         Notification notification = builder
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
-            .setContentTitle("Пора готовиться 💪")
-            .setContentText("До тренировки остался 1 час. Подготовь воду и форму.")
+            .setContentTitle("Versun — напоминание о тренировке")
+            .setContentText("Скоро на тренировку, не забудьте 💪")
             .setContentIntent(content)
             .setAutoCancel(true)
             .build();
