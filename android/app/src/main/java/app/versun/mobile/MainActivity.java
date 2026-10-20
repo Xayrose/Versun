@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
             }
         });
         setContentView(web);
-        if (state == null) web.loadUrl("https://xayrose.github.io/Versun/");
+        if (state == null) web.loadUrl("https://xayrose.github.io/Versun/app.html");
         else web.restoreState(state);
     }
 
