@@ -789,6 +789,13 @@ let trainingReminderTimer=null;
 async function saveTrainingReminder(){
   const time=$('#trainingTime')?.value||'18:00',enabled=!!$('#trainingReminderOn')?.checked,status=$('#trainingReminderStatus');
   db.settings.trainingTime=time;db.settings.trainingReminderOn=enabled;
+  if(window.VersunNative){
+    try{window.VersunNative.setTrainingReminder(time,enabled)}catch(e){}
+    await save();
+    if(status)status.textContent=enabled?'Сохранено в приложении. Напоминание придёт даже когда сайт закрыт.':'Напоминание выключено.';
+    toast(enabled?'🔔 Напоминание приложения сохранено':'Напоминание выключено');
+    return;
+  }
   if(enabled&&'Notification' in window&&Notification.permission==='default'){try{await Notification.requestPermission()}catch(e){}}
   if(enabled&&(!('Notification' in window)||Notification.permission!=='granted')){
     if(status)status.textContent='Уведомления не разрешены. Разреши их в настройках браузера для Versun.';
