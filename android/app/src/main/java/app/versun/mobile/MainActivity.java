@@ -1,6 +1,13 @@
 package app.versun.mobile;
 
 import android.app.Activity;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.os.Build;
+import android.provider.Settings;
+import java.util.Calendar;
 import android.os.Bundle;
 import android.Manifest;
 import android.content.pm.PackageManager;
@@ -24,6 +31,7 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private static final int REQ_CAMERA = 7101;
     private static final int REQ_FILE = 7102;
+    private static final int REQ_NOTIFICATIONS = 7103;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -41,6 +49,7 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         CookieManager.getInstance().setAcceptCookie(true);
         web.setWebViewClient(new WebViewClient());
+        web.addJavascriptInterface(new AndroidBridge(this), "VersunNative");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> {
@@ -84,6 +93,36 @@ public class MainActivity extends Activity {
         setContentView(web);
         if (state == null) web.loadUrl("https://xayrose.github.io/Versun/app.html");
         else web.restoreState(state);
+    }
+
+    public class AndroidBridge {
+        private final Context context;
+        AndroidBridge(Context context) { this.context = context.getApplicationContext(); }
+        @android.webkit.JavascriptInterface
+        public void setTrainingReminder(String time, boolean enabled) {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
+                }
+                Intent intent = new Intent(context, ReminderReceiver.class);
+                PendingIntent pending = PendingIntent.getBroadcast(context, 8101, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                if (alarm == null) return;
+                alarm.cancel(pending);
+                if (!enabled || time == null || !time.matches("[0-2][0-9]:[0-5][0-9]")) return;
+                try {
+                    String[] parts = time.split(":");
+                    Calendar when = Calendar.getInstance();
+                    when.set(Calendar.HOUR_OF_DAY, Integer.parseInt(parts[0]));
+                    when.set(Calendar.MINUTE, Integer.parseInt(parts[1]));
+                    when.set(Calendar.SECOND, 0);
+                    when.set(Calendar.MILLISECOND, 0);
+                    when.add(Calendar.HOUR_OF_DAY, -1);
+                    if (when.getTimeInMillis() <= System.currentTimeMillis()) when.add(Calendar.DAY_OF_YEAR, 1);
+                    alarm.setInexactRepeating(AlarmManager.RTC_WAKEUP, when.getTimeInMillis(), AlarmManager.INTERVAL_DAY, pending);
+                } catch (Exception ignored) { }
+            });
+        }
     }
 
     private void grantPendingCamera() {
